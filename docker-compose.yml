@@ -1,0 +1,27 @@
+# Docker Compose - Redis Setup
+#
+# This file makes it easy to run Redis without installing it locally.
+# Just run: docker-compose up -d
+#
+# Prerequisites: Docker Desktop must be installed and running.
+
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: task-queue-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis-data:
+    driver: local
