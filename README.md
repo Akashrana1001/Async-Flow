@@ -1,116 +1,81 @@
-# 🚀 Backend Task Queue
+# Backend Task Queue
 
-A **distributed task queue system** built with **Node.js**, **Express**, **Redis**, and **BullMQ** for processing background jobs asynchronously.
+![Node.js](https://img.shields.io/badge/Node.js-18-339933?logo=node.js&logoColor=white)
+![Express](https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)
+![BullMQ](https://img.shields.io/badge/BullMQ-5-FF6B6B)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-This project demonstrates understanding of asynchronous processing, background workers, queue systems, Redis usage, and scalable backend architecture.
-
----
-
-## Tech Stack
-
-**Backend:** Node.js, Express  
-**Queue Library:** BullMQ  
-**Caching Layer:** Redis  
-**Containerization:** Docker, Docker Compose  
-**Language:** JavaScript
+> A **distributed background job processing system** built with Node.js, Express, BullMQ, and Redis. Decouples slow tasks (email sending, image processing) from the HTTP request cycle using a persistent Redis-backed queue with priority levels, delayed scheduling, automatic retries, and real-time progress tracking.
 
 ---
 
-## Key Features
+## Table of Contents
 
-- Distributed background job processing across multiple workers
-- Redis-backed queue with persistent job state using BullMQ
-- Priority queue with high, medium, and low priority levels
-- Automatic retries with exponential backoff on job failure
-- Delayed job scheduling — run jobs after a specified time
-- Full job lifecycle tracking: `waiting → active → completed / failed`
-- Dockerized multi-service architecture for consistent environments
-
----
-
-## 📋 Table of Contents
-
-- [Overview](#overview)
+- [How It Works](#how-it-works)
 - [Architecture](#architecture)
-- [Features](#features)
 - [Project Structure](#project-structure)
-- [Setup Instructions](#setup-instructions)
+- [Prerequisites](#prerequisites)
+- [Getting Started](#getting-started)
 - [Running the Project](#running-the-project)
 - [API Endpoints](#api-endpoints)
-- [Example API Requests](#example-api-requests)
-- [Priority Queue](#priority-queue)
-- [Automatic Retries](#automatic-retries)
-- [Delayed Jobs](#delayed-jobs)
+- [Example Requests](#example-requests)
+- [Job Features](#job-features)
 - [Job States](#job-states)
-- [Performance Testing](#performance-testing)
-- [Failure Handling](#failure-handling)
-- [Scalability](#scalability)
-- [Future Improvements](#future-improvements)
-- [Demo](#demo)
-- [Technologies Used](#technologies-used)
-- [Author](#author)
+- [Configuration](#configuration)
+- [Tech Stack](#tech-stack)
 
 ---
 
-## Overview
+## How It Works
 
-This project implements a **background job processing system** where:
+### Request Flow
 
-1. A **REST API** accepts job requests from clients
-2. Jobs are stored in a **Redis-backed queue** using BullMQ
-3. A separate **worker process** picks up jobs and processes them in the background
-4. Clients can check **job status** at any time
+| Step | What Happens |
+|------|-------------|
+| 1 | Client sends a `POST` request with job data (e.g., email recipient, image URL) |
+| 2 | The API server validates the request and adds the job to the BullMQ queue in Redis |
+| 3 | The server immediately responds with a `jobId` — the client does not wait for processing |
+| 4 | The worker process (running separately) picks up the job from the queue |
+| 5 | The worker executes the job, reporting progress at each stage |
+| 6 | The client can poll `GET /jobs/:id` at any time to check the job's state and result |
 
-### Why is this useful?
+### Why a Background Queue?
 
-In real-world applications, some tasks take a long time to complete (sending emails, processing images, generating reports). Instead of making users wait, these tasks are pushed to a **background queue** and processed asynchronously.
+Some tasks are too slow to block an HTTP response — sending emails, processing images, generating PDFs. Without a queue, the user would wait several seconds per request and a single slow task could tie up the server.
+
+BullMQ solves this by acting as a persistent **message broker** between the API and the worker:
+- The API stays fast — it only writes a job to Redis and returns immediately
+- The worker runs in a **separate process** and can be scaled independently
+- Jobs survive server restarts because they are persisted in Redis
+- Failed jobs are **automatically retried** with exponential backoff
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-│              │  HTTP    │              │  Push   │              │
-│    Client    │ ──────>  │   Express    │ ──────> │    Redis     │
-│  (Browser /  │ <──────  │   API Server │         │    Queue     │
-│   curl)      │  JSON    │  (server.js) │         │              │
-│              │         │              │         │              │
-└──────────────┘         └──────────────┘         └──────┬───────┘
-                                                         │
-                                                         │ Pull
-                                                         ▼
-                                                  ┌──────────────┐
-                                                  │              │
-                                                  │   Worker     │
-                                                  │  Process     │
-                                                  │ (jobWorker)  │
-                                                  │              │
-                                                  └──────────────┘
+┌──────────┐     ┌─────────────┐     ┌─────────────────────┐
+│  Client  │ --> │ Express API │ --> │   Redis (BullMQ)    │
+│ (curl /  │ <-- │  server.js  │     │   Queue: task-queue │
+│  browser)│     └─────────────┘     └──────────┬──────────┘
+└──────────┘                                    │
+                                                │ listens
+                                                ▼
+                                      ┌─────────────────────┐
+                                      │   Worker Process    │
+                                      │   jobWorker.js      │
+                                      │                     │
+                                      │  job.name='email'   │
+                                      │  --> emailJob.js    │
+                                      │                     │
+                                      │  job.name='image'   │
+                                      │  --> imageJob.js    │
+                                      └─────────────────────┘
 ```
 
-**How it works:**
-1. Client sends a POST request to add a job (e.g., send email)
-2. The API server pushes the job into the Redis queue
-3. The worker process (running separately) picks up the job
-4. The worker processes the job and updates its status in Redis
-5. Client can query the job status at any time via GET request
-
----
-
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **Job Queue** | Redis-backed queue using BullMQ |
-| **REST API** | Express endpoints to add and monitor jobs |
-| **Priority Queue** | High, medium, low priority levels |
-| **Automatic Retries** | Failed jobs retry up to 3 times with exponential backoff |
-| **Delayed Jobs** | Schedule jobs to run after a specified delay |
-| **Job Status Tracking** | Track jobs through waiting → active → completed/failed |
-| **Background Workers** | Separate worker process for job execution |
-| **Colored Logging** | Console logs with timestamps and colors |
-| **Docker Support** | Docker Compose file for Redis |
+Both the API server and worker connect to the **same Redis instance**. The API pushes jobs in; the worker pulls them out and processes them.
 
 ---
 
@@ -118,76 +83,68 @@ In real-world applications, some tasks take a long time to complete (sending ema
 
 ```
 backend-task-queue/
-├── server.js                 # Express API server (entry point)
-├── package.json              # Dependencies and scripts
-├── .env                      # Environment variables
-├── .env.example              # Template for environment variables
-├── docker-compose.yml        # Docker setup for Redis
+├── server.js                  # Express app entry point
+├── package.json               # Dependencies and npm scripts
+├── docker-compose.yml         # Redis container (single service)
 │
 ├── queue/
-│   ├── redisConnection.js    # Shared Redis connection config
-│   └── jobQueue.js           # BullMQ queue setup & job helpers
+│   ├── redisConnection.js     # Shared Redis connection config (host, port)
+│   └── jobQueue.js            # BullMQ Queue instance + addEmailJob/addImageJob helpers
 │
 ├── workers/
-│   └── jobWorker.js          # Background worker process
+│   └── jobWorker.js           # Worker process — consumes and processes jobs
 │
 ├── jobs/
-│   ├── emailJob.js           # Email job handler (simulated)
-│   └── imageJob.js           # Image processing handler (simulated)
+│   ├── emailJob.js            # Email job handler (simulated, with progress reporting)
+│   └── imageJob.js            # Image processing handler (simulated, with progress reporting)
 │
 ├── routes/
-│   └── jobRoutes.js          # API route definitions
+│   └── jobRoutes.js           # Route definitions
 │
 ├── controllers/
-│   └── jobController.js      # Request handlers (business logic)
+│   └── jobController.js       # Request handlers and business logic
 │
 └── utils/
-    └── logger.js             # Colored console logger
+    └── logger.js              # Colored console logger (no external dependencies)
 ```
 
 ---
 
-## Setup Instructions
+## Prerequisites
 
-### Prerequisites
+- **Node.js 18+** — [nodejs.org](https://nodejs.org/)
+- **Redis 7** — either via Docker (recommended) or installed locally
+- **Docker + Docker Compose** — [docker.com](https://www.docker.com/) *(for the Redis container)*
 
-- **Node.js** (v18 or higher) - [Download](https://nodejs.org/)
-- **Redis** - Either via Docker or installed locally
-- **Docker** (optional) - [Download](https://www.docker.com/)
+---
 
-### 1. Clone and Install
+## Getting Started
+
+### 1. Install Dependencies
 
 ```bash
-# Navigate to the project directory
-cd backend-task-queue
-
-# Install dependencies
 npm install
 ```
 
 ### 2. Start Redis
 
-**Option A: Using Docker (recommended)**
+**Using Docker (recommended):**
 
 ```bash
 docker-compose up -d
 ```
 
-**Option B: Local Redis**
+This starts a single Redis 7 container (`task-queue-redis`) on port `6379`.
 
-If you have Redis installed locally, just make sure it's running:
+**Or use a local Redis installation:**
 
 ```bash
-# On Linux/Mac
-redis-server
-
-# On Windows (via WSL or Redis for Windows)
 redis-server
 ```
 
-### 3. Configure Environment
+### 3. Configure Environment (optional)
 
-The default `.env` file works out of the box for local development:
+Create a `.env` file in the project root to override defaults:
 
 ```env
 PORT=3000
@@ -199,35 +156,32 @@ REDIS_PORT=6379
 
 ## Running the Project
 
-You need **two terminal windows** — one for the API server and one for the worker.
+The system requires **two separate processes**. Open two terminals.
 
-### Terminal 1: Start the API Server
+### Terminal 1 — API Server
 
 ```bash
 npm start
 ```
 
-You should see:
 ```
 [SUCCESS] 🚀 Server running on http://localhost:3000
 [INFO]    Health check: http://localhost:3000/health
 [INFO]    Job routes:   http://localhost:3000/jobs
 ```
 
-### Terminal 2: Start the Worker
+### Terminal 2 — Worker
 
 ```bash
 npm run worker
 ```
 
-You should see:
 ```
+[INFO] 📋 Task queue initialized and connected to Redis
 [SUCCESS] 🚀 Worker started and listening for jobs...
-[INFO]    Queue: task-queue
-[INFO]    Concurrency: 1
 ```
 
-### Development Mode (with auto-reload)
+### Development Mode (auto-restart on file changes)
 
 ```bash
 npm run dev
@@ -237,32 +191,19 @@ npm run dev
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/jobs/email` | Add an email job to the queue |
-| `POST` | `/jobs/image` | Add an image processing job |
-| `GET` | `/jobs/:id` | Get status of a specific job |
-| `GET` | `/jobs` | List all recent jobs |
-| `GET` | `/health` | Health check endpoint |
+### `POST /jobs/email` — Add an Email Job
 
----
+**Request body:**
 
-## Example API Requests
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `to` | string | Yes | Recipient email address |
+| `subject` | string | Yes | Email subject line |
+| `body` | string | Yes | Email body content |
+| `priority` | string | No | `high`, `medium`, or `low` (default: `medium`) |
+| `delay` | number | No | Milliseconds before processing starts (default: `0`) |
 
-### 1. Add an Email Job
-
-```bash
-curl -X POST http://localhost:3000/jobs/email \
-  -H "Content-Type: application/json" \
-  -d '{
-    "to": "user@example.com",
-    "subject": "Welcome!",
-    "body": "Thanks for signing up!",
-    "priority": "high"
-  }'
-```
-
-**Response:**
+**Success `201`:**
 ```json
 {
   "success": true,
@@ -277,25 +218,40 @@ curl -X POST http://localhost:3000/jobs/email \
 }
 ```
 
-### 2. Add an Image Processing Job with Delay
+---
 
-```bash
-curl -X POST http://localhost:3000/jobs/image \
-  -H "Content-Type: application/json" \
-  -d '{
-    "imageUrl": "https://example.com/photo.jpg",
-    "priority": "low",
-    "delay": 10000
-  }'
+### `POST /jobs/image` — Add an Image Processing Job
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `imageUrl` | string | Yes | URL of the image to process |
+| `priority` | string | No | `high`, `medium`, or `low` (default: `medium`) |
+| `delay` | number | No | Milliseconds before processing starts (default: `0`) |
+
+**Success `201`:**
+```json
+{
+  "success": true,
+  "message": "Image processing job added to queue",
+  "data": {
+    "jobId": "2",
+    "type": "image",
+    "priority": "medium",
+    "delay": 0,
+    "status": "waiting"
+  }
+}
 ```
 
-### 3. Check Job Status
+---
 
-```bash
-curl http://localhost:3000/jobs/1
-```
+### `GET /jobs/:id` — Get Job Status
 
-**Response (completed job):**
+Returns full details for a single job: state, progress (0–100), result, and error info.
+
+**Completed job `200`:**
 ```json
 {
   "success": true,
@@ -304,236 +260,176 @@ curl http://localhost:3000/jobs/1
     "type": "email",
     "state": "completed",
     "progress": 100,
-    "data": {
-      "to": "user@example.com",
-      "subject": "Welcome!",
-      "body": "Thanks for signing up!"
-    },
+    "data": { "to": "user@example.com", "subject": "Welcome!", "body": "..." },
     "attempts": 1,
     "maxAttempts": 3,
-    "result": {
-      "status": "sent",
-      "to": "user@example.com",
-      "subject": "Welcome!",
-      "sentAt": "2024-01-15T10:30:00.000Z"
+    "createdAt": "2026-03-12T10:00:00.000Z",
+    "result": { "status": "sent", "to": "user@example.com", "sentAt": "2026-03-12T10:00:02.000Z" },
+    "completedAt": "2026-03-12T10:00:02.000Z"
+  }
+}
+```
+
+**Not found `404`:**
+```json
+{
+  "success": false,
+  "error": "Job with ID '99' not found"
+}
+```
+
+---
+
+### `GET /jobs` — List Recent Jobs
+
+Returns jobs grouped by state. Optional `?limit=N` query parameter (default: `10`).
+
+**Success `200`:**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": { "waiting": 2, "active": 1, "completed": 8, "failed": 1, "delayed": 0 },
+    "jobs": {
+      "waiting": [...],
+      "active": [...],
+      "completed": [...],
+      "failed": [...],
+      "delayed": [...]
     }
   }
 }
 ```
 
-### 4. List All Recent Jobs
+---
 
-```bash
-curl http://localhost:3000/jobs
-```
+### `GET /health` — Health Check
 
-```bash
-# With custom limit
-curl http://localhost:3000/jobs?limit=5
+```json
+{
+  "status": "ok",
+  "service": "backend-task-queue",
+  "timestamp": "2026-03-12T10:00:00.000Z"
+}
 ```
 
 ---
 
-## Priority Queue
+## Example Requests
 
-Jobs support three priority levels. Higher priority jobs are processed before lower ones.
+```bash
+# Add a high-priority email job
+curl -X POST http://localhost:3000/jobs/email \
+  -H "Content-Type: application/json" \
+  -d '{"to": "user@example.com", "subject": "Welcome!", "body": "Thanks for signing up!", "priority": "high"}'
 
-| Priority | Numeric Value | Description |
-|----------|--------------|-------------|
+# Add an image job that starts processing after 10 seconds
+curl -X POST http://localhost:3000/jobs/image \
+  -H "Content-Type: application/json" \
+  -d '{"imageUrl": "https://example.com/photo.jpg", "delay": 10000}'
+
+# Check a job's status
+curl http://localhost:3000/jobs/1
+
+# List all recent jobs (up to 20 per state)
+curl http://localhost:3000/jobs?limit=20
+
+# Health check
+curl http://localhost:3000/health
+```
+
+---
+
+## Job Features
+
+### Priority Queue
+
+| Priority | Internal Value | Description |
+|----------|---------------|-------------|
 | `high` | 1 | Processed first |
-| `medium` | 5 | Default priority |
+| `medium` | 5 | Default |
 | `low` | 10 | Processed last |
 
-**Example:** If you add a `low` priority job and then a `high` priority job, the `high` priority job will be processed first.
+### Automatic Retries
 
-```bash
-# This will be processed SECOND
-curl -X POST http://localhost:3000/jobs/email \
-  -H "Content-Type: application/json" \
-  -d '{"to": "a@test.com", "subject": "Low", "body": "...", "priority": "low"}'
-
-# This will be processed FIRST
-curl -X POST http://localhost:3000/jobs/email \
-  -H "Content-Type: application/json" \
-  -d '{"to": "b@test.com", "subject": "High", "body": "...", "priority": "high"}'
-```
-
----
-
-## Automatic Retries
-
-If a job fails (throws an error), BullMQ automatically retries it up to **3 times** using **exponential backoff**:
+Every job is configured with **3 attempts** and exponential backoff. If a job throws an error, BullMQ waits before retrying:
 
 | Attempt | Delay Before Retry |
 |---------|-------------------|
-| 1st retry | 2 seconds |
-| 2nd retry | 4 seconds |
-| 3rd retry | 8 seconds |
+| 1st retry | ~2 seconds |
+| 2nd retry | ~4 seconds |
+| 3rd retry | ~8 seconds |
 
-After all 3 retries are exhausted, the job is marked as **failed**.
+After all 3 retries fail, the job is moved to `failed` state. The demo handlers randomly fail ~10% of the time so you can observe retries in the worker logs.
 
-The demo jobs randomly fail ~10% of the time so you can see retries in action in the worker logs.
+### Delayed Scheduling
 
----
+Pass `delay` (milliseconds) to postpone when a job starts. The job enters `delayed` state and automatically moves to `waiting` once the delay expires.
 
-## Delayed Jobs
+### Progress Tracking
 
-You can schedule a job to start processing after a delay by passing the `delay` parameter (in milliseconds).
+Both handlers report incremental progress during execution:
 
-```bash
-# This job will start processing after 10 seconds
-curl -X POST http://localhost:3000/jobs/email \
-  -H "Content-Type: application/json" \
-  -d '{
-    "to": "user@example.com",
-    "subject": "Reminder",
-    "body": "Don't forget your meeting!",
-    "delay": 10000
-  }'
-```
+- **Email job** (`emailJob.js`): `0%` → `50%` → `100%` over ~2 seconds
+- **Image job** (`imageJob.js`): `0%` → `25%` → `50%` → `75%` → `100%` over ~3 seconds
 
-The job will be in `delayed` state until the delay expires, then it moves to `waiting` and gets processed normally.
+Progress is visible in the `GET /jobs/:id` response and in the worker console logs.
 
 ---
 
 ## Job States
 
-Each job goes through a lifecycle of states:
-
 ```
-  ┌─────────┐     ┌────────┐     ┌───────────┐
-  │ delayed  │ ──> │waiting │ ──> │  active   │
-  └─────────┘     └────────┘     └─────┬─────┘
-                                       │
-                              ┌────────┴────────┐
-                              ▼                 ▼
-                       ┌───────────┐     ┌──────────┐
-                       │ completed │     │  failed   │
-                       └───────────┘     └──────────┘
-                                               │
-                                               ▼ (retry)
-                                         ┌──────────┐
-                                         │ waiting  │
-                                         └──────────┘
-```
-
-| State | Description |
-|-------|-------------|
-| `delayed` | Job is waiting for its delay timer to expire |
-| `waiting` | Job is in the queue, ready to be picked up |
-| `active` | Job is currently being processed by a worker |
-| `completed` | Job finished successfully |
-| `failed` | Job failed after all retry attempts |
-
----
-
-## Performance Testing
-
-Load testing performed using [k6](https://k6.io/).
-
-### Test Setup
-
-| Parameter | Value |
-|-----------|-------|
-| Virtual Users | 50 |
-| Duration | 30 seconds |
-| Target Endpoint | `POST /jobs/email` |
-
-### Results
-
-| Metric | Value |
-|--------|-------|
-| Average Latency | _(add your result here)_ |
-| Requests per Second | _(add your result here)_ |
-| Error Rate | _(add your result here)_ |
-
-> **Screenshot:** _(add a screenshot of your k6 terminal output here)_
-
----
-
-## Failure Handling
-
-- If **Redis is unavailable**, the system fails open and allows requests through to prevent a hard outage.
-- **Timeout protection** is applied on Redis operations to prevent the API from blocking indefinitely.
-- **Rate limiting logic is stateless** on server instances — all state is stored in Redis, making individual servers replaceable.
-- Failed jobs are **automatically retried** up to 3 times with exponential backoff before being marked as failed.
-
----
-
-## Scalability
-
-The system scales horizontally by adding more API server instances behind a load balancer.  
-All instances share the same **Redis-backed job queue**, ensuring global coordination across distributed nodes.
-
-```
-         ┌─────────────────────────────────┐
-         │          Load Balancer          │
-         └──────────┬───────────┬──────────┘
-                    │           │
-             ┌──────▼───┐ ┌────▼──────┐
-             │ API Node │ │ API Node  │
-             │    #1    │ │    #2     │
-             └──────┬───┘ └────┬──────┘
-                    │          │
-             ┌──────▼──────────▼──────┐
-             │      Redis Queue       │
-             │  (shared state store)  │
-             └────────────┬───────────┘
-                          │
-             ┌────────────▼───────────┐
-             │   Worker Pool          │
-             │  (scales independently)│
-             └────────────────────────┘
+          ┌─────────┐
+          │ delayed │  waiting for delay to expire
+          └────┬────┘
+               │
+          ┌────▼────┐
+          │ waiting │  in queue, not yet picked up by the worker
+          └────┬────┘
+               │
+          ┌────▼────┐
+          │ active  │  worker is currently processing this job
+          └────┬────┘
+               │
+       ┌───────┴────────┐
+       │                │
+  ┌────▼─────┐    ┌─────▼────┐
+  │completed │    │  failed  │  all retries exhausted
+  └──────────┘    └──────────┘
 ```
 
 ---
 
-## Future Improvements
+## Configuration
 
-- [ ] Implement **Sliding Window** rate limiting algorithm
-- [ ] Implement **Token Bucket** algorithm
-- [ ] Add **Redis Cluster** support for high availability
-- [ ] Add **Prometheus + Grafana** monitoring dashboard
-- [ ] Add **Kubernetes** deployment manifests
-- [ ] Add **dead-letter queue** for jobs that exceed all retries
-- [ ] Build a **Web UI** for real-time job monitoring
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Port the Express server listens on |
+| `REDIS_HOST` | `localhost` | Redis hostname |
+| `REDIS_PORT` | `6379` | Redis port |
 
----
-
-## Demo
-
-> **GIF/Screenshot:** _(replace this line with your demo GIF or screenshot)_
->
-> Suggested recording:
-> - Submit several job requests via `curl` or a REST client
-> - Show jobs progressing through `waiting → active → completed` in worker logs
-> - Demonstrate an automatic retry when a job fails
+The `docker-compose.yml` starts **Redis only** — the Node.js processes (`npm start`, `npm run worker`) run locally.
 
 ---
 
-## Technologies Used
+## Tech Stack
 
-| Technology | Purpose |
-|------------|--------|
-| **Node.js** | Runtime environment |
-| **Express.js** | REST API framework |
-| **BullMQ** | Job queue library |
-| **Redis** | In-memory store for queue data |
-| **IORedis** | Redis client for Node.js |
-| **dotenv** | Environment variable management |
-| **Docker** | Containerized Redis setup |
-
----
-
-## 📝 License
-
-MIT
+| Technology | Version | Role |
+|------------|---------|------|
+| Node.js | 18 | JavaScript runtime |
+| Express | 4 | HTTP server and routing |
+| BullMQ | 5 | Job queue and worker management |
+| Redis | 7 | Persistent job store |
+| ioredis | 5 | Redis client (used by BullMQ) |
+| dotenv | 16 | Environment variable loading |
+| uuid | 9 | Unique ID generation |
+| nodemon | 3 | Dev-mode auto-restart |
+| Docker Compose | — | Redis container orchestration |
 
 ---
 
-## Author
+## License
 
-**Akash Chauhan**  
-GitHub: [github.com/Akashrana1001](https://github.com/Akashrana1001)  
-LinkedIn: [linkedin.com/in/akashrana100](https://linkedin.com/in/akashrana100)
+[MIT](https://opensource.org/licenses/MIT)
 
