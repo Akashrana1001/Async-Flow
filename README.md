@@ -6,6 +6,28 @@ This project demonstrates understanding of asynchronous processing, background w
 
 ---
 
+## Tech Stack
+
+**Backend:** Node.js, Express  
+**Queue Library:** BullMQ  
+**Caching Layer:** Redis  
+**Containerization:** Docker, Docker Compose  
+**Language:** JavaScript
+
+---
+
+## Key Features
+
+- Distributed background job processing across multiple workers
+- Redis-backed queue with persistent job state using BullMQ
+- Priority queue with high, medium, and low priority levels
+- Automatic retries with exponential backoff on job failure
+- Delayed job scheduling — run jobs after a specified time
+- Full job lifecycle tracking: `waiting → active → completed / failed`
+- Dockerized multi-service architecture for consistent environments
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -20,7 +42,13 @@ This project demonstrates understanding of asynchronous processing, background w
 - [Automatic Retries](#automatic-retries)
 - [Delayed Jobs](#delayed-jobs)
 - [Job States](#job-states)
+- [Performance Testing](#performance-testing)
+- [Failure Handling](#failure-handling)
+- [Scalability](#scalability)
+- [Future Improvements](#future-improvements)
+- [Demo](#demo)
 - [Technologies Used](#technologies-used)
+- [Author](#author)
 
 ---
 
@@ -399,10 +427,94 @@ Each job goes through a lifecycle of states:
 
 ---
 
+## Performance Testing
+
+Load testing performed using [k6](https://k6.io/).
+
+### Test Setup
+
+| Parameter | Value |
+|-----------|-------|
+| Virtual Users | 50 |
+| Duration | 30 seconds |
+| Target Endpoint | `POST /jobs/email` |
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Average Latency | _(add your result here)_ |
+| Requests per Second | _(add your result here)_ |
+| Error Rate | _(add your result here)_ |
+
+> **Screenshot:** _(add a screenshot of your k6 terminal output here)_
+
+---
+
+## Failure Handling
+
+- If **Redis is unavailable**, the system fails open and allows requests through to prevent a hard outage.
+- **Timeout protection** is applied on Redis operations to prevent the API from blocking indefinitely.
+- **Rate limiting logic is stateless** on server instances — all state is stored in Redis, making individual servers replaceable.
+- Failed jobs are **automatically retried** up to 3 times with exponential backoff before being marked as failed.
+
+---
+
+## Scalability
+
+The system scales horizontally by adding more API server instances behind a load balancer.  
+All instances share the same **Redis-backed job queue**, ensuring global coordination across distributed nodes.
+
+```
+         ┌─────────────────────────────────┐
+         │          Load Balancer          │
+         └──────────┬───────────┬──────────┘
+                    │           │
+             ┌──────▼───┐ ┌────▼──────┐
+             │ API Node │ │ API Node  │
+             │    #1    │ │    #2     │
+             └──────┬───┘ └────┬──────┘
+                    │          │
+             ┌──────▼──────────▼──────┐
+             │      Redis Queue       │
+             │  (shared state store)  │
+             └────────────┬───────────┘
+                          │
+             ┌────────────▼───────────┐
+             │   Worker Pool          │
+             │  (scales independently)│
+             └────────────────────────┘
+```
+
+---
+
+## Future Improvements
+
+- [ ] Implement **Sliding Window** rate limiting algorithm
+- [ ] Implement **Token Bucket** algorithm
+- [ ] Add **Redis Cluster** support for high availability
+- [ ] Add **Prometheus + Grafana** monitoring dashboard
+- [ ] Add **Kubernetes** deployment manifests
+- [ ] Add **dead-letter queue** for jobs that exceed all retries
+- [ ] Build a **Web UI** for real-time job monitoring
+
+---
+
+## Demo
+
+> **GIF/Screenshot:** _(replace this line with your demo GIF or screenshot)_
+>
+> Suggested recording:
+> - Submit several job requests via `curl` or a REST client
+> - Show jobs progressing through `waiting → active → completed` in worker logs
+> - Demonstrate an automatic retry when a job fails
+
+---
+
 ## Technologies Used
 
 | Technology | Purpose |
-|------------|---------|
+|------------|--------|
 | **Node.js** | Runtime environment |
 | **Express.js** | REST API framework |
 | **BullMQ** | Job queue library |
@@ -416,3 +528,12 @@ Each job goes through a lifecycle of states:
 ## 📝 License
 
 MIT
+
+---
+
+## Author
+
+**Akash Chauhan**  
+GitHub: [github.com/Akashrana1001](https://github.com/Akashrana1001)  
+LinkedIn: [linkedin.com/in/akashrana100](https://linkedin.com/in/akashrana100)
+
